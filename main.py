@@ -28,6 +28,7 @@ class ValidationSummary:
 
 def parse_requirement(line: str) -> Optional[Requirement]:
     stripped = line.strip()
+    # Only pinned requirements are relevant for version validation.
     if not stripped or stripped.startswith("#") or "==" not in stripped:
         return None
 
@@ -43,6 +44,7 @@ def fetch_json(url: str) -> Optional[dict]:
         with urlopen(request, timeout=15) as response:
             payload = json.load(response)
     except HTTPError as error:
+        # A 404 is the expected signal for a missing package or version.
         if error.code == 404:
             return None
         raise
@@ -53,6 +55,7 @@ def fetch_json(url: str) -> Optional[dict]:
 
 
 def _pypi_url(name: str, version: Optional[str] = None) -> str:
+    # Encode names and versions so special characters are safe in the URL.
     package = quote(name, safe="")
     if version is None:
         return f"{PYPI_URL}/{package}/json"
@@ -63,6 +66,7 @@ def _upload_time(payload: dict, url: str) -> datetime:
     urls = payload.get("urls")
     if not isinstance(urls, list) or not urls:
         raise ValueError(f"PyPI response has no files listed: {url}")
+    # PyPI lists release files in order; use the first file as requested.
     first_file = urls[0]
     if not isinstance(first_file, dict) or not isinstance(
         first_file.get("upload_time"), str
@@ -72,6 +76,7 @@ def _upload_time(payload: dict, url: str) -> datetime:
 
 
 def validate_requirements(lines: list[str]) -> ValidationSummary:
+    # Count all non-empty lines, including lines that are not pinned.
     checked = sum(bool(line.strip()) for line in lines)
     packages_not_on_pypi = 0
     versions_not_on_pypi = 0
@@ -87,6 +92,7 @@ def validate_requirements(lines: list[str]) -> ValidationSummary:
             packages_not_on_pypi += 1
             continue
 
+        # Check the exact pinned version only after the package exists.
         version_url = _pypi_url(requirement.name, requirement.version)
         version_payload = fetch_json(version_url)
         if version_payload is None:
@@ -94,6 +100,7 @@ def validate_requirements(lines: list[str]) -> ValidationSummary:
             continue
 
         release_time = _upload_time(version_payload, version_url)
+        # Keep the earliest upload time among valid pinned releases.
         if oldest is None or release_time < oldest[0]:
             oldest = (release_time, requirement)
 
